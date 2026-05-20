@@ -151,12 +151,9 @@
           <div class="processing-label">Transcribing &amp; analysing…</div>
         </div>
 
-        <!-- Judgment panel (shown after transcription) -->
+        <!-- Judgment panel (shown after transcription – transcription is hidden) -->
         <div class="judgment-panel" id="judgmentPanel" style="display:none">
-          <div class="result-block">
-            <div class="result-label">Transcription</div>
-            <div class="result-text" id="resultTx"></div>
-          </div>
+          <!-- Transcription block removed to avoid influencing the evaluator -->
           <div class="result-block">
             <div class="result-label">Predicted Sentiment</div>
             <div class="sentiment-display" id="sentimentDisplay"></div>
@@ -289,7 +286,7 @@
         if (data.error) { showStatus(data.error, 'error'); return; }
 
         document.getElementById('processingPanel').style.display = 'none';
-        document.getElementById('resultTx').textContent = data.transcription;
+        // No longer showing transcription: we only display the sentiment
         renderSentiment(data.sentiment, data.confidence, data.reasoning);
         document.getElementById('judgmentPanel').style.display = 'block';
       } catch (err) {

@@ -20,7 +20,7 @@ from flask import (
 from huggingface_hub import HfApi
 
 # ── Config ────────────────────────────────────────────────────────────────────
-FINETUNED_MODEL     = "ghananlpcommunity/qwen3-asr-0.6b-ghana-multilang"
+FINETUNED_MODEL     = "ghananlpcommunity/qwen3-asr-0.6b-ghana-twi-ewe-dagbani"
 BASE_MODEL          = "Qwen/Qwen3-ASR-0.6B"
 BUCKET_ID           = "ghananlpcommunity/unicef-evaluator-app-audio-file-storage"
 NVIDIA_API_KEY      = os.environ.get("NVIDIA_API_KEY", "")
