@@ -70,7 +70,7 @@ def download_models():
 # ── ASR inference class ────────────────────────────────────────────────────────
 @app.cls(
     image=asr_image,
-    gpu="T4",
+    gpu="A100-40GB",
     volumes={MODEL_CACHE_DIR: model_volume},   # mount the cache volume
     secrets=[HF_TOKEN_SECRET, SHARED_SECRET],
     timeout=180,

@@ -31,6 +31,7 @@
           </span>
         </div>
 
+        <!-- Progress -->
         <div class="progress-section">
           <div class="progress-label">
             <span>Progress</span>
@@ -41,6 +42,7 @@
           </div>
         </div>
 
+        <!-- Stats chips -->
         <div class="stat-cards">
           <div class="stat-card stat-finetuned">
             <div class="stat-label">🔬 Fine-tuned</div>
@@ -66,6 +68,7 @@
     <main class="eval-main">
 
       {% if done %}
+      <!-- ── COMPLETION SCREEN ── -->
       <div class="complete-screen">
         <div class="complete-icon">🎉</div>
         <h2>All Done!</h2>
@@ -100,58 +103,35 @@
       </div>
 
       {% else %}
+      <!-- ── EVALUATION SCREEN ── -->
       <div class="eval-content" id="evalContent">
         <div class="step-header">
           <span class="step-counter">{{ num }} <span class="step-of">of {{ total }}</span></span>
-          <span class="step-instruction">Listen to the audio, then click “Analyze Emotion”</span>
+          <span class="step-instruction">Review the text and the predicted emotion</span>
         </div>
 
-        <!-- Reference text -->
+        <!-- Original text -->
         <div class="text-card" id="textCard">
           <div class="text-lang-tag">{{ sess.language }}</div>
           <div class="sentence-text" id="sentenceText">{{ current.text }}</div>
-          <div class="read-hint">This is what was said (ground truth)</div>
+          <div class="read-hint">This is the original sentence</div>
         </div>
 
-        <!-- Audio player -->
-        <div class="audio-section">
-          <audio id="audioPlayer" controls>
-            <source src="/api/audio/{{ current.index }}" type="audio/wav">
-            Your browser does not support the audio element.
-          </audio>
+        <!-- Pre‑filled emotion result (no API calls) -->
+        <div class="result-block" style="margin-top:24px">
+          <div class="result-label">Predicted Emotion</div>
+          <div class="sentiment-display" id="sentimentDisplay"></div>
         </div>
-
-        <!-- Analyze button -->
-        <div class="analyze-section">
-          <button class="btn-analyze btn-primary" id="analyzeBtn" type="button">
-            <span>Analyze Emotion</span>
-            <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/></svg>
+        <div class="judge-prompt">Does this emotion match what the speaker <em>intended</em> to convey?</div>
+        <div class="judge-buttons">
+          <button class="btn-judge btn-correct" id="judgeCorrect" type="button">
+            <span class="judge-icon">✅</span>
+            <span>Correct</span>
           </button>
-        </div>
-
-        <!-- Processing -->
-        <div class="processing-panel" id="processingPanel" style="display:none">
-          <div class="processing-spinner"></div>
-          <div class="processing-label">Transcribing &amp; analysing…</div>
-        </div>
-
-        <!-- Judgment panel -->
-        <div class="judgment-panel" id="judgmentPanel" style="display:none">
-          <div class="result-block">
-            <div class="result-label">Predicted Emotion</div>
-            <div class="sentiment-display" id="sentimentDisplay"></div>
-          </div>
-          <div class="judge-prompt">Does this emotion match what the speaker <em>intended</em> to convey?</div>
-          <div class="judge-buttons">
-            <button class="btn-judge btn-correct" id="judgeCorrect" type="button">
-              <span class="judge-icon">✅</span>
-              <span>Correct</span>
-            </button>
-            <button class="btn-judge btn-wrong" id="judgeWrong" type="button">
-              <span class="judge-icon">❌</span>
-              <span>Wrong</span>
-            </button>
-          </div>
+          <button class="btn-judge btn-wrong" id="judgeWrong" type="button">
+            <span class="judge-icon">❌</span>
+            <span>Wrong</span>
+          </button>
         </div>
 
         <div class="status-msg" id="statusMsg"></div>
@@ -164,51 +144,33 @@
   <script>
     const TOTAL = {{ total }};
     {% if not done %}
+    // Immediately show the pre‑computed sentiment
+    (function() {
+      renderSentiment(
+        "{{ current.predicted_sentiment }}",
+        {{ current.sentiment_confidence }},
+        "{{ current.sentiment_reasoning | e }}"
+      );
+    })();
 
-    const analyzeBtn = document.getElementById('analyzeBtn');
-
-    analyzeBtn.addEventListener('click', async () => {
-      analyzeBtn.disabled = true;
-      document.getElementById('analyzeSection')?.classList.add('hidden');
-      document.getElementById('processingPanel').style.display = 'flex';
-
-      try {
-        const res = await fetch('/api/submit', { method: 'POST' });
-        const data = await res.json();
-        if (data.error) {
-          showStatus(data.error, 'error');
-          analyzeBtn.disabled = false;
-          document.getElementById('processingPanel').style.display = 'none';
-          return;
-        }
-
-        document.getElementById('processingPanel').style.display = 'none';
-        renderSentiment(data.sentiment, data.confidence, data.reasoning);
-        document.getElementById('judgmentPanel').style.display = 'block';
-      } catch (err) {
-        showStatus('Analysis failed: ' + err.message, 'error');
-        analyzeBtn.disabled = false;
-        document.getElementById('processingPanel').style.display = 'none';
-      }
-    });
+    const icons = {
+      "Happy":"😊","Excited":"🤩","Proud":"😌","Loved":"❤️","Relieved":"😅","Grateful":"🙏",
+      "Sad":"😢","Lonely":"🥺","Hopeless":"😞","Guilty":"😖","Ashamed":"😳",
+      "Angry":"😠","Frustrated":"😤","Irritated":"😒",
+      "Afraid":"😨","Anxious":"😰","Overwhelmed":"🤯",
+      "Confused":"😕","Curious":"🤔","Doubtful":"🤨",
+      "Embarrassed":"😬","Insecure":"🤐","Jealous":"😒","Rejected":"💔"
+    };
+    const colors = {
+      "Happy":"#34d399","Excited":"#34d399","Proud":"#34d399","Loved":"#34d399","Relieved":"#34d399","Grateful":"#34d399",
+      "Sad":"#f87171","Lonely":"#f87171","Hopeless":"#f87171","Guilty":"#f87171","Ashamed":"#f87171",
+      "Angry":"#f87171","Frustrated":"#f87171","Irritated":"#f87171",
+      "Afraid":"#fbbf24","Anxious":"#fbbf24","Overwhelmed":"#fbbf24",
+      "Confused":"#fbbf24","Curious":"#fbbf24","Doubtful":"#fbbf24",
+      "Embarrassed":"#fbbf24","Insecure":"#fbbf24","Jealous":"#fbbf24","Rejected":"#fbbf24"
+    };
 
     function renderSentiment(s, conf, reason) {
-      const icons   = {
-        "Happy":"😊","Excited":"🤩","Proud":"😌","Loved":"❤️","Relieved":"😅","Grateful":"🙏",
-        "Sad":"😢","Lonely":"🥺","Hopeless":"😞","Guilty":"😖","Ashamed":"😳",
-        "Angry":"😠","Frustrated":"😤","Irritated":"😒",
-        "Afraid":"😨","Anxious":"😰","Overwhelmed":"🤯",
-        "Confused":"😕","Curious":"🤔","Doubtful":"🤨",
-        "Embarrassed":"😬","Insecure":"🤐","Jealous":"😒","Rejected":"💔"
-      };
-      const colors  = {
-        "Happy":"#34d399","Excited":"#34d399","Proud":"#34d399","Loved":"#34d399","Relieved":"#34d399","Grateful":"#34d399",
-        "Sad":"#f87171","Lonely":"#f87171","Hopeless":"#f87171","Guilty":"#f87171","Ashamed":"#f87171",
-        "Angry":"#f87171","Frustrated":"#f87171","Irritated":"#f87171",
-        "Afraid":"#fbbf24","Anxious":"#fbbf24","Overwhelmed":"#fbbf24",
-        "Confused":"#fbbf24","Curious":"#fbbf24","Doubtful":"#fbbf24",
-        "Embarrassed":"#fbbf24","Insecure":"#fbbf24","Jealous":"#fbbf24","Rejected":"#fbbf24"
-      };
       const pct = Math.round((conf || 0) * 100);
       document.getElementById('sentimentDisplay').innerHTML = `
         <div class="sent-row">
@@ -223,25 +185,22 @@
 
     async function judge(judgment) {
       document.getElementById('judgeCorrect').disabled = true;
-      document.getElementById('judgeWrong').disabled   = true;
-
-      const res  = await fetch('/api/judge', {
+      document.getElementById('judgeWrong').disabled = true;
+      const res = await fetch('/api/judge', {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ judgment }),
       });
       const data = await res.json();
-
       if (data.done) {
         window.location.reload();
         return;
       }
-
       window.location.reload();
     }
 
     document.getElementById('judgeCorrect').addEventListener('click', () => judge('correct'));
-    document.getElementById('judgeWrong').addEventListener('click',   () => judge('wrong'));
+    document.getElementById('judgeWrong').addEventListener('click', () => judge('wrong'));
 
     document.getElementById('saveBtn').addEventListener('click', async () => {
       await fetch('/api/save', { method: 'POST' });
@@ -250,13 +209,6 @@
       msg.className = 'save-msg visible';
       setTimeout(() => { msg.className = 'save-msg'; }, 2500);
     });
-
-    function showStatus(msg, type) {
-      const el = document.getElementById('statusMsg');
-      el.textContent = msg;
-      el.className = `status-msg visible ${type}`;
-    }
-
     {% endif %}
   </script>
 
