@@ -200,26 +200,39 @@ def transcribe(audio_path: str, model_id: str) -> str:
         return f"[Transcription error: {e}]"
 
 
-# ── Sentiment via Gemini (Gemma) ───────────────────────────────────────────────
+# ── Emotion analysis via Gemini (Gemma) ────────────────────────────────────────
+EMOTION_LABELS = [
+    "Happy", "Excited", "Proud", "Loved", "Relieved", "Grateful",
+    "Sad", "Lonely", "Hopeless", "Guilty", "Ashamed",
+    "Angry", "Frustrated", "Irritated",
+    "Afraid", "Anxious", "Overwhelmed",
+    "Confused", "Curious", "Doubtful",
+    "Embarrassed", "Insecure", "Jealous", "Rejected"
+]
+
 def get_sentiment(transcription: str, language: str) -> dict:
     """
-    Uses Gemini with Gemma model to classify sentiment as strictly 'positive'
-    or 'negative'. No fallback – raises exception on failure.
+    Uses Gemini with Gemma model to pick the closest emotion label from EMOTION_LABELS.
+    No fallback – raises exception on failure.
     """
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY environment variable not set")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
+    labels_str = ", ".join(EMOTION_LABELS)
+
     prompt = (
-        f"You are a sentiment analysis expert for African languages.\n"
+        f"You are an emotion analysis expert for African languages.\n"
         f"Language: {language}\nTranscription: {transcription}\n\n"
-        "Classify the sentiment as strictly either 'positive' or 'negative'. "
-        "Do NOT use 'neutral'. If the text is neutral, choose the one that is closest "
-        "(e.g., slightly positive → 'positive', slightly negative → 'negative').\n"
-        "Respond ONLY with a JSON object with keys:\n"
-        "'sentiment' (must be 'positive' or 'negative'), 'confidence' (0.0–1.0), "
-        "'reasoning' (1 sentence in English explaining your choice)."
+        f"Classify the emotion expressed in the transcription by picking exactly one label from the list below. "
+        f"Choose the label that best matches, even if it's not a perfect fit. Do NOT invent new labels.\n\n"
+        f"Allowed labels:\n{labels_str}\n\n"
+        "You must respond with a JSON object in the exact format shown in the example below. "
+        "The 'sentiment' field must be one of the allowed labels (capitalised exactly as in the list).\n\n"
+        "Example:\n"
+        '{"sentiment": "Happy", "confidence": 0.87, "reasoning": "The speaker expresses joy and satisfaction with their recent achievement."}\n\n'
+        "Now produce the actual response for the transcription above. Do not include any other text."
     )
 
     response = client.models.generate_content(
@@ -227,7 +240,6 @@ def get_sentiment(transcription: str, language: str) -> dict:
         contents=prompt,
         config=genai.types.GenerateContentConfig(
             thinking_config=genai.types.ThinkingConfig(thinking_level="HIGH"),
-            # No Google Search needed
         ),
     )
 
@@ -242,12 +254,19 @@ def get_sentiment(transcription: str, language: str) -> dict:
         raise ValueError(f"Gemini did not return valid JSON: {response.text}")
 
     result = json.loads(raw[s:e])
-    sentiment = result.get("sentiment", "").strip().lower()
-    if sentiment not in ("positive", "negative"):
-        raise ValueError(f"Gemini returned invalid sentiment: {sentiment}")
+    sentiment = result.get("sentiment", "").strip()
+
+    # Find matching label (case-insensitive)
+    match = None
+    for label in EMOTION_LABELS:
+        if label.lower() == sentiment.lower():
+            match = label
+            break
+    if not match:
+        raise ValueError(f"Gemini returned invalid emotion label: '{sentiment}'. Allowed: {labels_str}")
 
     return {
-        "sentiment": sentiment,
+        "sentiment": match,
         "confidence": result.get("confidence", 0.5),
         "reasoning": result.get("reasoning", ""),
     }
@@ -452,11 +471,11 @@ def api_submit():
         bucket_upload_audio(session["volunteer_id"], idx, tmp_path)
         it["audio_uploaded"] = True
 
-        # Sentiment analysis – no try/catch, will raise on failure -> 500
-        sv = get_sentiment(tx, sess_data["language"])
-        it["predicted_sentiment"]  = sv.get("sentiment", "positive")
-        it["sentiment_confidence"] = sv.get("confidence", 0.5)
-        it["sentiment_reasoning"]  = sv.get("reasoning", "")
+        # Emotion analysis – will raise an exception if anything fails
+        emo = get_sentiment(tx, sess_data["language"])
+        it["predicted_sentiment"]  = emo["sentiment"]
+        it["sentiment_confidence"] = emo["confidence"]
+        it["sentiment_reasoning"]  = emo.get("reasoning", "")
 
         items[idx]         = it
         sess_data["items"] = items
