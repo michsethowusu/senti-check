@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UNICEF Ghana ASR Evaluator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body class="login-page">
+
+  <div class="login-bg">
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-orb orb-3"></div>
+    <div class="grid-overlay"></div>
+  </div>
+
+  <div class="login-wrap">
+    <div class="login-card">
+
+      <div class="login-logo">
+        <div class="mic-icon">
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="16" y="4" width="16" height="24" rx="8" fill="currentColor" opacity=".15"/>
+            <rect x="18" y="4" width="12" height="24" rx="6" stroke="currentColor" stroke-width="2"/>
+            <path d="M10 22c0 7.732 6.268 14 14 14s14-6.268 14-14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="24" y1="36" x2="24" y2="44" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="18" y1="44" x2="30" y2="44" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="login-title-group">
+          <span class="login-eyebrow">UNICEF Ghana NLP</span>
+          <h1 class="login-title">ASR Evaluator</h1>
+        </div>
+      </div>
+
+      <p class="login-desc">Help improve speech recognition for Twi, Ewe and Dagbani. Enter your volunteer code to begin.</p>
+
+      {% if error %}
+      <div class="alert alert-error">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="POST" action="/login" class="login-form">
+        <div class="field-group">
+          <label for="code">Volunteer Code</label>
+          <input type="text" id="code" name="code" placeholder="Paste your code here…"
+                 autocomplete="off" autocorrect="off" spellcheck="false" autofocus>
+        </div>
+        <button type="submit" class="btn-primary btn-lg">
+          <span>Log In &amp; Start</span>
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+        </button>
+      </form>
+
+      <div class="login-footer">
+        Don't have a code? Contact your coordinator.
+        <br>
+        <span class="lang-pills">
+          <span>Twi</span><span>Ewe</span><span>Dagbani</span>
+        </span>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

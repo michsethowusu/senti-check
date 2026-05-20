@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: unicef-asr-evaluator
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: HF_TOKEN
+        sync: false          # set manually in Render dashboard
+      - key: NVIDIA_API_KEY
+        sync: false          # for DeepSeek sentiment via NVIDIA NIM
+      - key: SECRET_KEY
+        generateValue: true  # Render auto-generates a random value
+      - key: MODAL_ASR_URL
+        sync: false          # paste URL printed after: modal deploy modal_asr.py
+      - key: MODAL_SHARED_SECRET
+        sync: false          # any long random string – must match Modal secret
+    plan: free
+    healthCheckPath: /health
