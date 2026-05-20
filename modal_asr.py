@@ -1,5 +1,5 @@
 """
-modal_asr.py  –  Modal GPU transcription service
+modal_asr.py  –  Modal GPU transcription service (uses qwen-asr)
 Deploy with:  modal deploy modal_asr.py
 
 Exposes a web endpoint that Flask calls for ASR inference.
@@ -26,18 +26,18 @@ HF_TOKEN_SECRET = modal.Secret.from_name("unicef-hf-token")   # set up in Modal 
 SHARED_SECRET   = modal.Secret.from_name("unicef-asr-shared-secret")  # protects the endpoint
 
 # ── Image ──────────────────────────────────────────────────────────────────────
-# Bake heavy deps into the image so they're available on every cold start
 asr_image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install(
         "torch>=2.2.0",
         "torchaudio>=2.2.0",
-        "transformers>=4.41.0",
+        "transformers>=4.41.0",        # still needed for snapshot_download, tokenizer etc.
         "huggingface-hub>=0.23.0",
         "accelerate>=0.30.0",
         "soundfile",
         "librosa",
         "fastapi[standard]",
+        "qwen-asr",                    # ← this is the key package for Qwen3-ASR
     )
 )
 
@@ -87,28 +87,23 @@ class ASRService:
     def load_models(self):
         """Called once when the container starts – loads both models into GPU memory."""
         import torch
-        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline as hf_pipeline
+        from qwen_asr import Qwen3ASRModel
 
-        hf_token = os.environ.get("HF_TOKEN", "")
-        dev      = "cuda"
-        dtype    = torch.float16
+        # Choose dtype: bfloat16 if Ampere+, else float16
+        use_bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8
+        dtype = torch.bfloat16 if use_bf16 else torch.float16
 
-        self._pipes = {}
+        self._models = {}
         for model_id in [FINETUNED_MODEL, BASE_MODEL]:
             local_dir = f"{MODEL_CACHE_DIR}/{model_id.replace('/', '__')}"
-            # Fall back to HF hub if volume doesn't have it yet
             load_from = local_dir if os.path.isdir(local_dir) else model_id
             print(f"[INFO] Loading {model_id} from {load_from}")
-            m    = AutoModelForSpeechSeq2Seq.from_pretrained(
-                       load_from, torch_dtype=dtype, low_cpu_mem_usage=True,
-                       token=hf_token).to(dev)
-            proc = AutoProcessor.from_pretrained(load_from, token=hf_token)
-            self._pipes[model_id] = hf_pipeline(
-                "automatic-speech-recognition",
-                model=m, tokenizer=proc.tokenizer,
-                feature_extractor=proc.feature_extractor,
-                torch_dtype=dtype, device=dev,
+            model = Qwen3ASRModel.from_pretrained(
+                load_from,
+                dtype=dtype,
+                device_map="cuda:0",
             )
+            self._models[model_id] = model
             print(f"[INFO] Loaded {model_id}")
 
     @modal.fastapi_endpoint(method="POST")   # Replaces deprecated @modal.web_endpoint
@@ -125,7 +120,7 @@ class ASRService:
         Returns:
           { "transcription": "..." }   or   { "error": "..." }
         """
-        import tempfile, base64 as b64
+        import tempfile, base64 as b64, soundfile as sf, numpy as np
 
         # ── Auth ──
         expected = os.environ.get("SHARED_SECRET", "")
@@ -146,16 +141,17 @@ class ASRService:
         except Exception as e:
             return {"error": f"base64 decode failed: {e}"}
 
-        # Write to temp file
+        # Write to temp file (the qwen-asr model expects a file path)
         suffix = f".{audio_fmt}" if audio_fmt else ".webm"
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 
         try:
-            pipe   = self._pipes[model_id]
-            result = pipe(tmp_path, return_timestamps=False)
-            text   = result["text"].strip()
+            model = self._models[model_id]
+            # Transcribe using the dedicated qwen-asr API
+            result = model.transcribe(audio=tmp_path)
+            text = result[0].text.strip() if result else ""
             return {"transcription": text}
         except Exception as e:
             return {"error": f"Transcription failed: {e}"}
