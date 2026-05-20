@@ -18,12 +18,13 @@ from flask import (
     session, redirect, url_for
 )
 from huggingface_hub import HfApi
+from google import genai                           # Gemini API
 
 # ── Config ────────────────────────────────────────────────────────────────────
 FINETUNED_MODEL     = "ghananlpcommunity/qwen3-asr-0.6b-ghana-twi-ewe-dagbani"
 BASE_MODEL          = "Qwen/Qwen3-ASR-0.6B"
 BUCKET_ID           = "ghananlpcommunity/unicef-evaluator-app-audio-file-storage"
-NVIDIA_API_KEY      = os.environ.get("NVIDIA_API_KEY", "")
+GEMINI_API_KEY      = os.environ.get("GEMINI_API_KEY", "")
 HF_TOKEN            = os.environ.get("HF_TOKEN", "")
 SECRET_KEY          = os.environ.get("SECRET_KEY", "unicef-asr-secret-change-me")
 MODAL_ASR_URL       = os.environ.get("MODAL_ASR_URL", "")
@@ -199,33 +200,57 @@ def transcribe(audio_path: str, model_id: str) -> str:
         return f"[Transcription error: {e}]"
 
 
-# ── Sentiment via NVIDIA ───────────────────────────────────────────────────────
+# ── Sentiment via Gemini (Gemma) ───────────────────────────────────────────────
 def get_sentiment(transcription: str, language: str) -> dict:
-    import requests as req
-    if not NVIDIA_API_KEY:
-        return {"sentiment": "neutral", "confidence": 0.5, "reasoning": "No NVIDIA_API_KEY set."}
+    """
+    Uses Gemini with Gemma model to classify sentiment as strictly 'positive'
+    or 'negative'. No fallback – raises exception on failure.
+    """
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY environment variable not set")
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
     prompt = (
         f"You are a sentiment analysis expert for African languages.\n"
         f"Language: {language}\nTranscription: {transcription}\n\n"
-        "Analyse the sentiment. Respond ONLY with a JSON object with keys:\n"
-        "'sentiment' (positive/negative/neutral), 'confidence' (0.0–1.0), "
-        "'reasoning' (1 sentence in English)."
+        "Classify the sentiment as strictly either 'positive' or 'negative'. "
+        "Do NOT use 'neutral'. If the text is neutral, choose the one that is closest "
+        "(e.g., slightly positive → 'positive', slightly negative → 'negative').\n"
+        "Respond ONLY with a JSON object with keys:\n"
+        "'sentiment' (must be 'positive' or 'negative'), 'confidence' (0.0–1.0), "
+        "'reasoning' (1 sentence in English explaining your choice)."
     )
-    try:
-        r   = req.post(
-            "https://integrate.api.nvidia.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {NVIDIA_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "deepseek-ai/deepseek-r1",
-                  "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 200, "temperature": 0.1},
-            timeout=30,
-        )
-        txt = r.json()["choices"][0]["message"]["content"]
-        txt = txt.replace("```json", "").replace("```", "").strip()
-        s, e = txt.find("{"), txt.rfind("}") + 1
-        return json.loads(txt[s:e])
-    except Exception as ex:
-        return {"sentiment": "neutral", "confidence": 0.5, "reasoning": str(ex)}
+
+    response = client.models.generate_content(
+        model="gemma-4-31b-it",
+        contents=prompt,
+        config=genai.types.GenerateContentConfig(
+            thinking_config=genai.types.ThinkingConfig(thinking_level="HIGH"),
+            # No Google Search needed
+        ),
+    )
+
+    raw = response.text.strip()
+    # Extract JSON – sometimes the model wraps it in markdown code fences
+    if "```" in raw:
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    s, e = raw.find("{"), raw.rfind("}") + 1
+    if s == -1 or e <= s:
+        raise ValueError(f"Gemini did not return valid JSON: {response.text}")
+
+    result = json.loads(raw[s:e])
+    sentiment = result.get("sentiment", "").strip().lower()
+    if sentiment not in ("positive", "negative"):
+        raise ValueError(f"Gemini returned invalid sentiment: {sentiment}")
+
+    return {
+        "sentiment": sentiment,
+        "confidence": result.get("confidence", 0.5),
+        "reasoning": result.get("reasoning", ""),
+    }
 
 
 # ── Bucket I/O ─────────────────────────────────────────────────────────────────
@@ -427,8 +452,9 @@ def api_submit():
         bucket_upload_audio(session["volunteer_id"], idx, tmp_path)
         it["audio_uploaded"] = True
 
+        # Sentiment analysis – no try/catch, will raise on failure -> 500
         sv = get_sentiment(tx, sess_data["language"])
-        it["predicted_sentiment"]  = sv.get("sentiment", "neutral")
+        it["predicted_sentiment"]  = sv.get("sentiment", "positive")
         it["sentiment_confidence"] = sv.get("confidence", 0.5)
         it["sentiment_reasoning"]  = sv.get("reasoning", "")
 

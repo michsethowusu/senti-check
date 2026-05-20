@@ -3,3 +3,4 @@ gunicorn>=21.2.0
 huggingface-hub>=0.23.0
 datasets>=2.19.0
 requests>=2.31.0
+google-genai
