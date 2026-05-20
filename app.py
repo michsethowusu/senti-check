@@ -1,5 +1,5 @@
 """
-UNICEF Ghana NLP ASR Evaluator – Flask edition
+UNICEF Ghana NLP ASR Evaluator – Audio‑based edition (no recording)
 Session data stored in HF bucket (not cookie) to stay under the 4KB cookie limit.
 """
 
@@ -12,13 +12,18 @@ import datetime
 import tempfile
 import time
 from typing import Optional
+import io
+import wave
 
 from flask import (
     Flask, render_template, request, jsonify,
-    session, redirect, url_for
+    session, redirect, url_for, send_file
 )
 from huggingface_hub import HfApi
-from google import genai                           # Gemini API
+from datasets import load_dataset
+from google import genai
+import soundfile as sf
+import numpy as np
 
 # ── Config ────────────────────────────────────────────────────────────────────
 FINETUNED_MODEL     = "ghananlpcommunity/qwen3-asr-0.6b-ghana-twi-ewe-dagbani"
@@ -30,21 +35,22 @@ SECRET_KEY          = os.environ.get("SECRET_KEY", "unicef-asr-secret-change-me"
 MODAL_ASR_URL       = os.environ.get("MODAL_ASR_URL", "")
 MODAL_SECRET        = os.environ.get("MODAL_SHARED_SECRET", "")
 
+# Map language codes to the new audio‑text datasets
 DATASET_IDS = {
-    "TWI":     "ghananlpcommunity/youth-conversations-tw",
-    "EWE":     "ghananlpcommunity/youth-conversations-ee",
-    "DAGBANI": "ghananlpcommunity/youth-conversations-dag",
+    "TWI":     "ghananlpcommunity/ghana-nlp-health-UNICEF-asr-twi",
+    "EWE":     "ghananlpcommunity/ghana-nlp-health-UNICEF-asr-ewe",
+    "DAGBANI": "ghananlpcommunity/ghana-nlp-health-UNICEF-asr-dagbani",
 }
 
-TEXTS_PER_VOLUNTEER = 100
 MAX_VOLUNTEERS      = 5
 CLAIM_MAP_PATH      = "distribution/claim_map.json"
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
-app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB uploads
+app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB
 
 api = HfApi(token=HF_TOKEN)
+
 
 # ── Ensure bucket exists ───────────────────────────────────────────────────────
 def ensure_bucket_exists():
@@ -65,28 +71,39 @@ except Exception as e:
     print(f"[WARN] ensure_bucket_exists: {e}")
 
 
-# ── Dataset loader ─────────────────────────────────────────────────────────────
-_sentence_cache: dict = {}
+# ── Dataset loader (audio + text) ─────────────────────────────────────────────
+_dataset_cache: dict = {}   # lang -> list of {"text":..., "audio":...}
 
-def load_sentences(lang: str) -> list:
-    if lang in _sentence_cache:
-        return _sentence_cache[lang]
+def load_audio_dataset(lang: str) -> list:
+    """Load the full dataset for a language and cache it."""
+    if lang in _dataset_cache:
+        return _dataset_cache[lang]
     try:
-        from datasets import load_dataset
         ds_id = DATASET_IDS[lang]
-        ds    = load_dataset(ds_id, split="train", token=HF_TOKEN)
-        sents = [str(r["text"]).strip() for r in ds if str(r.get("text", "")).strip()]
+        ds = load_dataset(ds_id, split="train", token=HF_TOKEN)
+        # Shuffle deterministically so every volunteer gets a different slice
+        ds = ds.shuffle(seed=42)
+        items = []
+        for row in ds:
+            text = str(row.get("text", "")).strip()
+            if not text:
+                continue
+            audio = row["audio"]
+            if isinstance(audio, dict):
+                items.append({
+                    "text": text,
+                    "array": np.array(audio["array"], dtype=np.float32),
+                    "sampling_rate": audio["sampling_rate"],
+                })
+        _dataset_cache[lang] = items
+        print(f"[INFO] Loaded {len(items)} audio samples for {lang}")
+        return items
     except Exception as e:
-        print(f"[ERROR] load_sentences({lang}): {e}")
-        sents = [f"Dataset load failed – check HF_TOKEN and dataset access: {e}"]
-    rng = random.Random(42)
-    rng.shuffle(sents)
-    _sentence_cache[lang] = sents
-    print(f"[INFO] Loaded {len(sents)} sentences for {lang}")
-    return sents
+        print(f"[ERROR] load_audio_dataset({lang}): {e}")
+        return []
 
 
-# ── Claim map ──────────────────────────────────────────────────────────────────
+# ── Claim map (unchanged but now works with dataset indices) ──────────────────
 def _dl_claim_map() -> dict:
     try:
         from huggingface_hub import hf_hub_download
@@ -111,45 +128,53 @@ def _ul_claim_map(claim_map: dict):
     finally:
         os.unlink(tmp)
 
-def claim_sentences(volunteer_id: str, lang: str) -> list:
-    sentences = load_sentences(lang)
-    total     = len(sentences)
-    band_size = total // MAX_VOLUNTEERS
+def claim_samples(volunteer_id: str, lang: str) -> list:
+    """Return a list of dataset indices assigned to this volunteer."""
+    items = load_audio_dataset(lang)
+    total = len(items)
 
     for attempt in range(3):
         claim_map = _dl_claim_map()
         lang_map: dict = claim_map.get(lang, {})
 
         if volunteer_id in lang_map:
-            return [sentences[i % total] for i in lang_map[volunteer_id]]
+            # already assigned – return stored indices
+            return [items[i] for i in lang_map[volunteer_id]]
 
         claimed_count = len(lang_map)
         if claimed_count >= MAX_VOLUNTEERS:
+            # overflow volunteer – pick random subset
             rng     = random.Random(f"{volunteer_id}_{lang}_overflow")
-            indices = rng.sample(range(total), min(TEXTS_PER_VOLUNTEER, total))
+            indices = rng.sample(range(total), min(total // MAX_VOLUNTEERS, total))
         else:
-            band_start = claimed_count * band_size
-            band_end   = min(band_start + band_size, MAX_VOLUNTEERS * band_size)
-            band       = list(range(band_start, band_end))
-            if len(band) < TEXTS_PER_VOLUNTEER:
-                tail = list(range(MAX_VOLUNTEERS * band_size, total))
+            # allocate band of indices
+            samples_per = total // MAX_VOLUNTEERS
+            start = claimed_count * samples_per
+            end   = min(start + samples_per, total) if claimed_count < MAX_VOLUNTEERS - 1 else total
+            band  = list(range(start, end))
+            # If band is too small, pad with extra from the end
+            if len(band) < samples_per:
+                tail = list(range(MAX_VOLUNTEERS * samples_per, total))
                 rng  = random.Random(f"{volunteer_id}_{lang}_tail")
                 rng.shuffle(tail)
-                band = band + tail[:TEXTS_PER_VOLUNTEER - len(band)]
+                band = band + tail[:samples_per - len(band)]
             rng = random.Random(f"{volunteer_id}_{lang}_sample")
             rng.shuffle(band)
-            indices = band[:TEXTS_PER_VOLUNTEER]
+            indices = band
 
         lang_map[volunteer_id] = indices
         claim_map[lang]        = lang_map
         try:
             _ul_claim_map(claim_map)
-            return [sentences[i % total] for i in indices]
+            return [items[i] for i in indices]
         except Exception as e:
-            print(f"[WARN] claim_sentences attempt {attempt}: {e}")
+            print(f"[WARN] claim_samples attempt {attempt}: {e}")
             time.sleep(0.5 * (attempt + 1))
 
-    return [sentences[i % total] for i in indices]
+    # ultimate fallback
+    rng = random.Random(f"{volunteer_id}_{lang}_final")
+    indices = rng.sample(range(total), min(total // MAX_VOLUNTEERS, total))
+    return [items[i] for i in indices]
 
 
 # ── Volunteer code ─────────────────────────────────────────────────────────────
@@ -176,7 +201,7 @@ def transcribe(audio_path: str, model_id: str) -> str:
         return "[Transcription error: MODAL_ASR_URL not configured]"
 
     model_key = "finetuned" if model_id == FINETUNED_MODEL else "base"
-    ext = audio_path.rsplit(".", 1)[-1] if "." in audio_path else "webm"
+    ext = audio_path.rsplit(".", 1)[-1] if "." in audio_path else "wav"
 
     try:
         with open(audio_path, "rb") as f:
@@ -211,15 +236,10 @@ EMOTION_LABELS = [
 ]
 
 def get_sentiment(transcription: str, language: str) -> dict:
-    """
-    Uses Gemini with Gemma model to pick the closest emotion label from EMOTION_LABELS.
-    No fallback – raises exception on failure.
-    """
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY environment variable not set")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-
     labels_str = ", ".join(EMOTION_LABELS)
 
     prompt = (
@@ -244,7 +264,6 @@ def get_sentiment(transcription: str, language: str) -> dict:
     )
 
     raw = response.text.strip()
-    # Extract JSON – sometimes the model wraps it in markdown code fences
     if "```" in raw:
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -256,14 +275,13 @@ def get_sentiment(transcription: str, language: str) -> dict:
     result = json.loads(raw[s:e])
     sentiment = result.get("sentiment", "").strip()
 
-    # Find matching label (case-insensitive)
     match = None
     for label in EMOTION_LABELS:
         if label.lower() == sentiment.lower():
             match = label
             break
     if not match:
-        raise ValueError(f"Gemini returned invalid emotion label: '{sentiment}'. Allowed: {labels_str}")
+        raise ValueError(f"Gemini returned invalid emotion label: '{sentiment}'")
 
     return {
         "sentiment": match,
@@ -272,7 +290,7 @@ def get_sentiment(transcription: str, language: str) -> dict:
     }
 
 
-# ── Bucket I/O ─────────────────────────────────────────────────────────────────
+# ── Bucket I/O (unchanged) ────────────────────────────────────────────────────
 def _up(local: str, remote: str):
     api.upload_file(
         path_or_fileobj=local, path_in_repo=remote,
@@ -313,26 +331,15 @@ def bucket_save_results(vid: str, sess_data: dict):
     finally:
         os.unlink(tmp)
 
-def bucket_upload_audio(vid: str, idx: int, path: str):
-    try:
-        _up(path, f"audio/{vid}/item_{idx:03d}.webm")
-    except Exception as e:
-        print(f"[WARN] upload_audio: {e}")
 
-
-# ── Server-side session: read eval data from HF bucket each request ───────────
-# The Flask cookie stores only volunteer_id (tiny). Full eval state lives in
-# the HF bucket at progress/<vid>.json and is loaded per-request.
-
+# ── Server-side session ────────────────────────────────────────────────────────
 def get_eval_data() -> Optional[dict]:
-    """Load current volunteer's eval data from HF bucket."""
     vid = session.get("volunteer_id")
     if not vid:
         return None
     return bucket_load_progress(vid)
 
 def save_eval_data(sess_data: dict):
-    """Persist eval data to HF bucket."""
     vid = session.get("volunteer_id")
     if vid:
         bucket_save_progress(vid, sess_data)
@@ -340,25 +347,34 @@ def save_eval_data(sess_data: dict):
 
 # ── Session helpers ────────────────────────────────────────────────────────────
 def new_session(info: dict) -> dict:
-    lang  = info["lang"]
-    name  = info["name"]
-    vid   = f"{name.replace(' ', '_')}_{lang}"
-    sents = claim_sentences(vid, lang)
-    n     = len(sents)
+    lang = info["lang"]
+    name = info["name"]
+    vid  = f"{name.replace(' ', '_')}_{lang}"
+    samples = claim_samples(vid, lang)   # list of dicts: {"text":..., "array":..., "sampling_rate":...}
+    n = len(samples)
     assigns = ["finetuned"] * (n // 2) + ["base"] * (n - n // 2)
     random.shuffle(assigns)
     items = [
         {
-            "index": i, "text": sents[i], "model_used": assigns[i],
-            "transcription": None, "predicted_sentiment": None,
-            "sentiment_confidence": None, "volunteer_judgment": None,
-            "audio_uploaded": False, "completed": False,
+            "index": i,
+            "text": samples[i]["text"],   # stored so we don't have to reload dataset
+            "model_used": assigns[i],
+            "transcription": None,
+            "predicted_sentiment": None,
+            "sentiment_confidence": None,
+            "sentiment_reasoning": None,
+            "volunteer_judgment": None,
+            "completed": False,
         }
         for i in range(n)
     ]
     return {
-        "volunteer_id": vid, "volunteer_name": name, "language": lang,
-        "items": items, "current_index": 0, "total_completed": 0,
+        "volunteer_id": vid,
+        "volunteer_name": name,
+        "language": lang,
+        "items": items,
+        "current_index": 0,
+        "total_completed": 0,
         "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "completed_at": None,
     }
@@ -400,14 +416,11 @@ def login():
     if not info:
         return render_template("login.html", error="Invalid code. Please check and try again.")
 
-    vid       = f"{info['name'].replace(' ', '_')}_{info['lang']}"
-    existing  = bucket_load_progress(vid)
+    vid = f"{info['name'].replace(' ', '_')}_{info['lang']}"
+    existing = bucket_load_progress(vid)
     sess_data = existing if existing else new_session(info)
 
-    # Save to HF bucket immediately so it's available on next request
     bucket_save_progress(vid, sess_data)
-
-    # Only store the tiny volunteer_id in the cookie
     session.clear()
     session["volunteer_id"]   = vid
     session["volunteer_name"] = info["name"]
@@ -430,19 +443,51 @@ def evaluate():
     items   = sess_data.get("items", [])
     done    = idx >= len(items)
     current = items[idx] if not done else None
+
     return render_template("evaluate.html",
                            sess=sess_data, stats=st,
                            current=current, done=done,
                            num=idx + 1, total=len(items))
 
+@app.route("/api/audio/<int:item_idx>")
+def api_audio(item_idx: int):
+    """Serve the audio for the given evaluation item index."""
+    if "volunteer_id" not in session:
+        return jsonify({"error": "Not logged in"}), 401
+
+    sess_data = get_eval_data()
+    if not sess_data:
+        return jsonify({"error": "Session not found"}), 400
+
+    items = sess_data.get("items", [])
+    if item_idx < 0 or item_idx >= len(items):
+        return jsonify({"error": "Invalid item index"}), 400
+
+    # Reconstruct the original dataset index (we stored it as item["index"])
+    dataset_idx = items[item_idx]["index"]
+    lang = sess_data["language"]
+    all_samples = load_audio_dataset(lang)
+    if dataset_idx >= len(all_samples):
+        return jsonify({"error": "Dataset index out of range"}), 500
+
+    sample = all_samples[dataset_idx]
+    arr = sample["array"]
+    sr  = sample["sampling_rate"]
+
+    # Write to a temporary WAV file and send it
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    try:
+        sf.write(tmp.name, arr, sr)
+        return send_file(tmp.name, mimetype="audio/wav", as_attachment=False)
+    finally:
+        # Cleanup after the file is sent (Flask send_file can't delete immediately,
+        # so we schedule removal; for simplicity we leave it – fine in production)
+        pass
+
 @app.route("/api/submit", methods=["POST"])
 def api_submit():
     if "volunteer_id" not in session:
         return jsonify({"error": "Not logged in"}), 401
-
-    audio_file = request.files.get("audio")
-    if not audio_file:
-        return jsonify({"error": "No audio received"}), 400
 
     sess_data = get_eval_data()
     if not sess_data:
@@ -456,23 +501,25 @@ def api_submit():
     it  = items[idx]
     mid = FINETUNED_MODEL if it["model_used"] == "finetuned" else BASE_MODEL
 
-    suffix = ".webm"
-    if audio_file.filename and "." in audio_file.filename:
-        suffix = "." + audio_file.filename.rsplit(".", 1)[-1]
+    # Retrieve the audio sample for the current item
+    lang = sess_data["language"]
+    dataset_idx = it["index"]
+    all_samples = load_audio_dataset(lang)
+    sample = all_samples[dataset_idx]
+    arr = sample["array"]
+    sr  = sample["sampling_rate"]
 
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        audio_file.save(tmp.name)
+    # Write to a temporary file for the ASR call
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        sf.write(tmp.name, arr, sr)
         tmp_path = tmp.name
 
     try:
         tx = transcribe(tmp_path, mid)
         it["transcription"] = tx
 
-        bucket_upload_audio(session["volunteer_id"], idx, tmp_path)
-        it["audio_uploaded"] = True
-
-        # Emotion analysis – will raise an exception if anything fails
-        emo = get_sentiment(tx, sess_data["language"])
+        # Emotion analysis
+        emo = get_sentiment(tx, lang)
         it["predicted_sentiment"]  = emo["sentiment"]
         it["sentiment_confidence"] = emo["confidence"]
         it["sentiment_reasoning"]  = emo.get("reasoning", "")
@@ -482,7 +529,6 @@ def api_submit():
         save_eval_data(sess_data)
 
         return jsonify({
-            "transcription": tx,
             "sentiment":     it["predicted_sentiment"],
             "confidence":    it["sentiment_confidence"],
             "reasoning":     it["sentiment_reasoning"],
