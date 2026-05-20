@@ -1,6 +1,6 @@
 """
 UNICEF Ghana NLP ASR Evaluator – Flask edition
-Compatible with Render (free tier) – deploy via GitHub.
+Session data stored in HF bucket (not cookie) to stay under the 4KB cookie limit.
 """
 
 import os
@@ -22,10 +22,12 @@ from huggingface_hub import HfApi
 # ── Config ────────────────────────────────────────────────────────────────────
 FINETUNED_MODEL     = "ghananlpcommunity/qwen3-asr-0.6b-ghana-multilang"
 BASE_MODEL          = "Qwen/Qwen3-ASR-0.6B"
-BUCKET_ID           = "michsethowusu/unicef-evaluator-app-audio-file-storage"
+BUCKET_ID           = "ghananlpcommunity/unicef-evaluator-app-audio-file-storage"
 NVIDIA_API_KEY      = os.environ.get("NVIDIA_API_KEY", "")
 HF_TOKEN            = os.environ.get("HF_TOKEN", "")
 SECRET_KEY          = os.environ.get("SECRET_KEY", "unicef-asr-secret-change-me")
+MODAL_ASR_URL       = os.environ.get("MODAL_ASR_URL", "")
+MODAL_SECRET        = os.environ.get("MODAL_SHARED_SECRET", "")
 
 DATASET_IDS = {
     "TWI":     "ghananlpcommunity/youth-conversations-tw",
@@ -164,16 +166,8 @@ def decode_code(code: str) -> Optional[dict]:
         return None
 
 
-# ── Modal ASR (GPU inference via Modal web endpoint) ───────────────────────────
-MODAL_ASR_URL   = os.environ.get("MODAL_ASR_URL", "")   # set in Render env vars
-MODAL_SECRET    = os.environ.get("MODAL_SHARED_SECRET", "")
-
+# ── Modal ASR ─────────────────────────────────────────────────────────────────
 def transcribe(audio_path: str, model_id: str) -> str:
-    """
-    Send audio to the Modal GPU endpoint for transcription.
-    model_id is the full HF model string; we map it to "finetuned" / "base"
-    so the Modal service knows which loaded pipeline to use.
-    """
     import base64 as b64
     import requests as req
 
@@ -277,16 +271,34 @@ def bucket_save_results(vid: str, sess_data: dict):
 
 def bucket_upload_audio(vid: str, idx: int, path: str):
     try:
-        _up(path, f"audio/{vid}/item_{idx:03d}.wav")
+        _up(path, f"audio/{vid}/item_{idx:03d}.webm")
     except Exception as e:
         print(f"[WARN] upload_audio: {e}")
 
 
+# ── Server-side session: read eval data from HF bucket each request ───────────
+# The Flask cookie stores only volunteer_id (tiny). Full eval state lives in
+# the HF bucket at progress/<vid>.json and is loaded per-request.
+
+def get_eval_data() -> Optional[dict]:
+    """Load current volunteer's eval data from HF bucket."""
+    vid = session.get("volunteer_id")
+    if not vid:
+        return None
+    return bucket_load_progress(vid)
+
+def save_eval_data(sess_data: dict):
+    """Persist eval data to HF bucket."""
+    vid = session.get("volunteer_id")
+    if vid:
+        bucket_save_progress(vid, sess_data)
+
+
 # ── Session helpers ────────────────────────────────────────────────────────────
 def new_session(info: dict) -> dict:
-    lang = info["lang"]
-    name = info["name"]
-    vid  = f"{name.replace(' ', '_')}_{lang}"
+    lang  = info["lang"]
+    name  = info["name"]
+    vid   = f"{name.replace(' ', '_')}_{lang}"
     sents = claim_sentences(vid, lang)
     n     = len(sents)
     assigns = ["finetuned"] * (n // 2) + ["base"] * (n - n // 2)
@@ -344,15 +356,18 @@ def login():
     if not info:
         return render_template("login.html", error="Invalid code. Please check and try again.")
 
-    vid      = f"{info['name'].replace(' ', '_')}_{info['lang']}"
-    existing = bucket_load_progress(vid)
+    vid       = f"{info['name'].replace(' ', '_')}_{info['lang']}"
+    existing  = bucket_load_progress(vid)
     sess_data = existing if existing else new_session(info)
 
-    # Store in Flask session
+    # Save to HF bucket immediately so it's available on next request
+    bucket_save_progress(vid, sess_data)
+
+    # Only store the tiny volunteer_id in the cookie
+    session.clear()
     session["volunteer_id"]   = vid
     session["volunteer_name"] = info["name"]
     session["language"]       = info["lang"]
-    session["eval_data"]      = sess_data   # full state in cookie (encrypted)
 
     return redirect(url_for("evaluate"))
 
@@ -360,12 +375,17 @@ def login():
 def evaluate():
     if "volunteer_id" not in session:
         return redirect(url_for("index"))
-    sess_data = session.get("eval_data", {})
-    st        = calc_stats(sess_data)
-    idx       = sess_data.get("current_index", 0)
-    items     = sess_data.get("items", [])
-    done      = idx >= len(items)
-    current   = items[idx] if not done else None
+
+    sess_data = get_eval_data()
+    if not sess_data:
+        session.clear()
+        return redirect(url_for("index"))
+
+    st      = calc_stats(sess_data)
+    idx     = sess_data.get("current_index", 0)
+    items   = sess_data.get("items", [])
+    done    = idx >= len(items)
+    current = items[idx] if not done else None
     return render_template("evaluate.html",
                            sess=sess_data, stats=st,
                            current=current, done=done,
@@ -373,7 +393,6 @@ def evaluate():
 
 @app.route("/api/submit", methods=["POST"])
 def api_submit():
-    """Receives audio blob, transcribes, runs sentiment."""
     if "volunteer_id" not in session:
         return jsonify({"error": "Not logged in"}), 401
 
@@ -381,16 +400,18 @@ def api_submit():
     if not audio_file:
         return jsonify({"error": "No audio received"}), 400
 
-    sess_data = session.get("eval_data", {})
-    idx       = sess_data.get("current_index", 0)
-    items     = sess_data.get("items", [])
+    sess_data = get_eval_data()
+    if not sess_data:
+        return jsonify({"error": "Session not found"}), 400
+
+    idx   = sess_data.get("current_index", 0)
+    items = sess_data.get("items", [])
     if idx >= len(items):
         return jsonify({"error": "All items complete"}), 400
 
     it  = items[idx]
     mid = FINETUNED_MODEL if it["model_used"] == "finetuned" else BASE_MODEL
 
-    # Save audio to temp file
     suffix = ".webm"
     if audio_file.filename and "." in audio_file.filename:
         suffix = "." + audio_file.filename.rsplit(".", 1)[-1]
@@ -403,7 +424,6 @@ def api_submit():
         tx = transcribe(tmp_path, mid)
         it["transcription"] = tx
 
-        # Upload audio to bucket (fire-and-forget)
         bucket_upload_audio(session["volunteer_id"], idx, tmp_path)
         it["audio_uploaded"] = True
 
@@ -412,10 +432,9 @@ def api_submit():
         it["sentiment_confidence"] = sv.get("confidence", 0.5)
         it["sentiment_reasoning"]  = sv.get("reasoning", "")
 
-        items[idx] = it
+        items[idx]         = it
         sess_data["items"] = items
-        session["eval_data"] = sess_data
-        session.modified = True
+        save_eval_data(sess_data)
 
         return jsonify({
             "transcription": tx,
@@ -431,18 +450,20 @@ def api_submit():
 
 @app.route("/api/judge", methods=["POST"])
 def api_judge():
-    """Records volunteer judgment (correct/wrong) and advances."""
     if "volunteer_id" not in session:
         return jsonify({"error": "Not logged in"}), 401
 
-    data      = request.get_json()
-    judgment  = data.get("judgment")  # "correct" | "wrong"
+    data     = request.get_json()
+    judgment = data.get("judgment")
     if judgment not in ("correct", "wrong"):
         return jsonify({"error": "Invalid judgment"}), 400
 
-    sess_data = session.get("eval_data", {})
-    idx       = sess_data.get("current_index", 0)
-    items     = sess_data.get("items", [])
+    sess_data = get_eval_data()
+    if not sess_data:
+        return jsonify({"error": "Session not found"}), 400
+
+    idx   = sess_data.get("current_index", 0)
+    items = sess_data.get("items", [])
 
     it = items[idx]
     it["volunteer_judgment"] = judgment
@@ -452,8 +473,6 @@ def api_judge():
     sess_data["total_completed"] = sess_data.get("total_completed", 0) + 1
     sess_data["current_index"]  = idx + 1
 
-    bucket_save_progress(session["volunteer_id"], sess_data)
-
     total = len(items)
     done  = sess_data["current_index"] >= total
 
@@ -461,8 +480,7 @@ def api_judge():
         sess_data["completed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         bucket_save_results(session["volunteer_id"], sess_data)
 
-    session["eval_data"] = sess_data
-    session.modified = True
+    save_eval_data(sess_data)
 
     st = calc_stats(sess_data)
     return jsonify({"done": done, "stats": st,
@@ -473,8 +491,9 @@ def api_judge():
 def api_save():
     if "volunteer_id" not in session:
         return jsonify({"error": "Not logged in"}), 401
-    sess_data = session.get("eval_data", {})
-    bucket_save_progress(session["volunteer_id"], sess_data)
+    sess_data = get_eval_data()
+    if sess_data:
+        save_eval_data(sess_data)
     return jsonify({"ok": True})
 
 @app.route("/logout")
