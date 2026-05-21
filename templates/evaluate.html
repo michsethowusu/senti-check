@@ -15,7 +15,7 @@
 
   <div class="eval-layout">
 
-    <!-- Sidebar -->
+    <!-- Sidebar – no per-model stats -->
     <aside class="sidebar">
       <div class="sidebar-top">
         <div class="sidebar-logo">
@@ -31,7 +31,7 @@
           </span>
         </div>
 
-        <!-- Progress -->
+        <!-- Progress (only) -->
         <div class="progress-section">
           <div class="progress-label">
             <span>Progress</span>
@@ -39,20 +39,6 @@
           </div>
           <div class="progress-track">
             <div class="progress-fill" style="width:{{ (stats.done / stats.total * 100) | int if stats.total else 0 }}%"></div>
-          </div>
-        </div>
-
-        <!-- Stats chips -->
-        <div class="stat-cards">
-          <div class="stat-card stat-finetuned">
-            <div class="stat-label">🔬 Fine-tuned</div>
-            <div class="stat-pct">{{ ((stats.fc / stats.ft * 100) | int if stats.ft else 0) }}%</div>
-            <div class="stat-sub">{{ stats.fc }}/{{ stats.ft }} correct</div>
-          </div>
-          <div class="stat-card stat-base">
-            <div class="stat-label">🧪 Base</div>
-            <div class="stat-pct">{{ ((stats.bc / stats.bt * 100) | int if stats.bt else 0) }}%</div>
-            <div class="stat-sub">{{ stats.bc }}/{{ stats.bt }} correct</div>
           </div>
         </div>
       </div>
@@ -68,7 +54,7 @@
     <main class="eval-main">
 
       {% if done %}
-      <!-- ── COMPLETION SCREEN ── -->
+      <!-- ── COMPLETION SCREEN (unchanged, shows final stats) ── -->
       <div class="complete-screen">
         <div class="complete-icon">🎉</div>
         <h2>All Done!</h2>
@@ -117,7 +103,7 @@
           <div class="read-hint">This is the original sentence</div>
         </div>
 
-        <!-- Pre‑filled emotion result (no API calls) -->
+        <!-- Predicted emotion (pre‑filled) -->
         <div class="result-block" style="margin-top:24px">
           <div class="result-label">Predicted Emotion</div>
           <div class="sentiment-display" id="sentimentDisplay"></div>
