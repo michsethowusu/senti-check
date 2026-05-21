@@ -96,11 +96,10 @@
           <span class="step-instruction">Review the text and the predicted emotion</span>
         </div>
 
-        <!-- Original text -->
+        <!-- Original text (no hint line) -->
         <div class="text-card" id="textCard">
           <div class="text-lang-tag">{{ sess.language }}</div>
           <div class="sentence-text" id="sentenceText">{{ current.text }}</div>
-          <div class="read-hint">This is the original sentence</div>
         </div>
 
         <!-- Predicted emotion (pre‑filled) -->
@@ -130,6 +129,14 @@
   <script>
     const TOTAL = {{ total }};
     {% if not done %}
+    // Immediately show the pre‑computed sentiment
+    (function() {
+      renderSentiment(
+        "{{ current.predicted_sentiment }}",
+        {{ current.sentiment_confidence }},
+        "{{ current.sentiment_reasoning | e }}"
+      );
+    })();
 
     const icons = {
       "Happy":"😊","Excited":"🤩","Proud":"😌","Loved":"❤️","Relieved":"😅","Grateful":"🙏",
@@ -160,13 +167,6 @@
           </div>
         </div>`;
     }
-
-    // Call after function + maps are defined — fixes blank emotion bug
-    renderSentiment(
-      "{{ current.predicted_sentiment }}",
-      {{ current.sentiment_confidence }},
-      "{{ current.sentiment_reasoning | e }}"
-    );
 
     async function judge(judgment) {
       document.getElementById('judgeCorrect').disabled = true;
