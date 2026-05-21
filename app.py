@@ -272,9 +272,17 @@ def evaluate():
     items = sess_data.get("items", [])
     done = idx >= len(items)
     current = items[idx] if not done else None
+    # Serialize only the fields the template needs — avoids tojson-in-dict syntax errors
+    current_json = None
+    if current:
+        current_json = json.dumps({
+            "predicted_sentiment": current.get("predicted_sentiment") or "",
+            "confidence":          float(current.get("sentiment_confidence") or 0),
+            "reasoning":           current.get("sentiment_reasoning") or "",
+        })
     return render_template("evaluate.html",
                            sess=sess_data, stats=st,
-                           current=current, done=done,
+                           current=current, current_json=current_json, done=done,
                            num=idx + 1, total=len(items))
 
 @app.route("/api/judge", methods=["POST"])

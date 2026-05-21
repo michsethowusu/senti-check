@@ -96,7 +96,7 @@
           <span class="step-instruction">Review the text and the predicted emotion</span>
         </div>
 
-        <!-- Original text (no hint line) -->
+        <!-- Original text -->
         <div class="text-card" id="textCard">
           <div class="text-lang-tag">{{ sess.language }}</div>
           <div class="sentence-text" id="sentenceText">{{ current.text }}</div>
@@ -129,14 +129,8 @@
   <script>
     const TOTAL = {{ total }};
     {% if not done %}
-    // Immediately show the pre‑computed sentiment
-    (function() {
-      renderSentiment(
-        "{{ current.predicted_sentiment }}",
-        {{ current.sentiment_confidence }},
-        "{{ current.sentiment_reasoning | e }}"
-      );
-    })();
+    // Safely injected from Python as a JSON string — no quote/None injection risk
+    const CURRENT = {{ current_json | safe }};
 
     const icons = {
       "Happy":"😊","Excited":"🤩","Proud":"😌","Loved":"❤️","Relieved":"😅","Grateful":"🙏",
@@ -167,6 +161,9 @@
           </div>
         </div>`;
     }
+
+    // Call after function + maps are defined, using safely-passed CURRENT
+    renderSentiment(CURRENT.predicted_sentiment, CURRENT.confidence, CURRENT.reasoning);
 
     async function judge(judgment) {
       document.getElementById('judgeCorrect').disabled = true;
