@@ -7,129 +7,252 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <style>
+    /* ── Top bar ── */
+    .topbar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      background: rgba(15,15,25,0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      z-index: 100;
+      gap: 16px;
+    }
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .topbar-logo svg {
+      width: 22px; height: 22px;
+      color: #a78bfa;
+    }
+    .topbar-logo span {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      color: #fff;
+    }
+    {% set lang_colors = {"TWI": "#a78bfa", "EWE": "#34d399", "DAGBANI": "#fb923c"} %}
+    .topbar-badge {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .05em;
+      padding: 3px 8px;
+      border-radius: 99px;
+      background: {{ lang_colors.get(sess.language, '#a78bfa') }}20;
+      color: {{ lang_colors.get(sess.language, '#a78bfa') }};
+    }
+    .topbar-name {
+      font-size: 13px;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* progress in the middle */
+    .topbar-progress {
+      flex: 1;
+      max-width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .topbar-progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+    }
+    .topbar-track {
+      height: 3px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .topbar-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, #a78bfa, #34d399);
+      transition: width .4s ease;
+    }
+
+    /* right actions */
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .btn-topbar-save {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05);
+      color: rgba(255,255,255,0.7);
+      cursor: pointer;
+      transition: background .2s, color .2s;
+    }
+    .btn-topbar-save:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .btn-topbar-logout {
+      font-size: 12px;
+      color: rgba(255,255,255,0.35);
+      text-decoration: none;
+      transition: color .2s;
+    }
+    .btn-topbar-logout:hover { color: rgba(255,255,255,0.7); }
+    .save-toast {
+      position: fixed;
+      bottom: 24px; left: 50%;
+      transform: translateX(-50%) translateY(12px);
+      background: #1e1e2e;
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #34d399;
+      font-size: 13px;
+      padding: 10px 20px;
+      border-radius: 10px;
+      opacity: 0;
+      transition: opacity .3s, transform .3s;
+      pointer-events: none;
+    }
+    .save-toast.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── Page body with top bar offset ── */
+    body.eval-page {
+      padding-top: 56px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .eval-center {
+      width: 100%;
+      max-width: 640px;
+      padding: 48px 24px 64px;
+    }
+  </style>
 </head>
 <body class="eval-page">
 
   <div class="bg-orb orb-static-1"></div>
   <div class="bg-orb orb-static-2"></div>
 
-  <div class="eval-layout">
+  <!-- ── Top bar ── -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-logo">
+        <svg viewBox="0 0 32 32" fill="none"><rect x="10" y="2" width="12" height="18" rx="6" stroke="currentColor" stroke-width="1.5"/><path d="M6 15c0 5.523 4.477 10 10 10s10-4.477 10-10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="16" y1="25" x2="16" y2="30" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="12" y1="30" x2="20" y2="30" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span>ASR Eval</span>
+      </div>
+      <span class="topbar-badge">{{ sess.language }}</span>
+      <span class="topbar-name">{{ sess.volunteer_name }}</span>
+    </div>
 
-    <!-- Sidebar – only progress, no model scores -->
-    <aside class="sidebar">
-      <div class="sidebar-top">
-        <div class="sidebar-logo">
-          <svg viewBox="0 0 32 32" fill="none"><rect x="10" y="2" width="12" height="18" rx="6" stroke="currentColor" stroke-width="1.5"/><path d="M6 15c0 5.523 4.477 10 10 10s10-4.477 10-10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="16" y1="25" x2="16" y2="30" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="12" y1="30" x2="20" y2="30" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          <span>ASR Eval</span>
+    <div class="topbar-progress">
+      <div class="topbar-progress-label">
+        <span>Progress</span>
+        <span>{{ stats.done }} / {{ stats.total }}</span>
+      </div>
+      <div class="topbar-track">
+        <div class="topbar-fill" style="width:{{ (stats.done / stats.total * 100) | int if stats.total else 0 }}%"></div>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <button class="btn-topbar-save" id="saveBtn">💾 Save &amp; Pause</button>
+      <a href="/logout" class="btn-topbar-logout">Sign out</a>
+    </div>
+  </header>
+
+  <!-- ── Centered content ── -->
+  <div class="eval-center">
+
+    {% if done %}
+    <!-- ── COMPLETION SCREEN ── -->
+    <div class="complete-screen">
+      <div class="complete-icon">🎉</div>
+      <h2>All Done!</h2>
+      <p>Thank you for contributing to Ghanaian language NLP research. Your evaluations have been saved.</p>
+
+      {% set fta = (stats.fc / stats.ft * 100) | int if stats.ft else 0 %}
+      {% set ba  = (stats.bc / stats.bt * 100) | int if stats.bt else 0 %}
+      <div class="final-stats">
+        <div class="final-stat">
+          <div class="final-model">Fine-tuned</div>
+          <div class="final-pct" style="color:#34d399">{{ fta }}%</div>
+          <div class="final-sub">{{ stats.fc }}/{{ stats.ft }}</div>
         </div>
-
-        <div class="volunteer-card">
-          <div class="volunteer-name">{{ sess.volunteer_name }}</div>
-          {% set lang_colors = {"TWI": "#a78bfa", "EWE": "#34d399", "DAGBANI": "#fb923c"} %}
-          <span class="lang-badge" style="background:{{ lang_colors.get(sess.language, '#a78bfa') }}20;color:{{ lang_colors.get(sess.language, '#a78bfa') }};">
-            {{ sess.language }}
-          </span>
-        </div>
-
-        <!-- Progress (only) -->
-        <div class="progress-section">
-          <div class="progress-label">
-            <span>Progress</span>
-            <strong>{{ stats.done }} / {{ stats.total }}</strong>
-          </div>
-          <div class="progress-track">
-            <div class="progress-fill" style="width:{{ (stats.done / stats.total * 100) | int if stats.total else 0 }}%"></div>
-          </div>
+        <div class="final-vs">VS</div>
+        <div class="final-stat">
+          <div class="final-model">Base Model</div>
+          <div class="final-pct" style="color:#fb923c">{{ ba }}%</div>
+          <div class="final-sub">{{ stats.bc }}/{{ stats.bt }}</div>
         </div>
       </div>
 
-      <div class="sidebar-bottom">
-        <button class="btn-save" id="saveBtn">💾 Save &amp; Pause</button>
-        <a href="/logout" class="btn-logout">Sign out</a>
-        <div id="saveMsg" class="save-msg"></div>
+      <div class="winner-banner">
+        🏆 Winner:
+        {% if fta > ba %}
+          <strong style="color:#34d399">Fine-tuned model 🔬</strong>
+        {% elif ba > fta %}
+          <strong style="color:#fb923c">Base model 🧪</strong>
+        {% else %}
+          <strong style="color:#fbbf24">It's a tie! 🤝</strong>
+        {% endif %}
       </div>
-    </aside>
+    </div>
 
-    <!-- Main -->
-    <main class="eval-main">
-
-      {% if done %}
-      <!-- ── COMPLETION SCREEN ── -->
-      <div class="complete-screen">
-        <div class="complete-icon">🎉</div>
-        <h2>All Done!</h2>
-        <p>Thank you for contributing to Ghanaian language NLP research. Your evaluations have been saved.</p>
-
-        {% set fta = (stats.fc / stats.ft * 100) | int if stats.ft else 0 %}
-        {% set ba  = (stats.bc / stats.bt * 100) | int if stats.bt else 0 %}
-        <div class="final-stats">
-          <div class="final-stat">
-            <div class="final-model">Fine-tuned</div>
-            <div class="final-pct" style="color:#34d399">{{ fta }}%</div>
-            <div class="final-sub">{{ stats.fc }}/{{ stats.ft }}</div>
-          </div>
-          <div class="final-vs">VS</div>
-          <div class="final-stat">
-            <div class="final-model">Base Model</div>
-            <div class="final-pct" style="color:#fb923c">{{ ba }}%</div>
-            <div class="final-sub">{{ stats.bc }}/{{ stats.bt }}</div>
-          </div>
-        </div>
-
-        <div class="winner-banner">
-          🏆 Winner:
-          {% if fta > ba %}
-            <strong style="color:#34d399">Fine-tuned model 🔬</strong>
-          {% elif ba > fta %}
-            <strong style="color:#fb923c">Base model 🧪</strong>
-          {% else %}
-            <strong style="color:#fbbf24">It's a tie! 🤝</strong>
-          {% endif %}
-        </div>
+    {% else %}
+    <!-- ── EVALUATION SCREEN ── -->
+    <div class="eval-content" id="evalContent">
+      <div class="step-header">
+        <span class="step-counter">{{ num }} <span class="step-of">of {{ total }}</span></span>
+        <span class="step-instruction">Review the text and the predicted emotion</span>
       </div>
 
-      {% else %}
-      <!-- ── EVALUATION SCREEN ── -->
-      <div class="eval-content" id="evalContent">
-        <div class="step-header">
-          <span class="step-counter">{{ num }} <span class="step-of">of {{ total }}</span></span>
-          <span class="step-instruction">Review the text and the predicted emotion</span>
-        </div>
-
-        <!-- Original text -->
-        <div class="text-card" id="textCard">
-          <div class="text-lang-tag">{{ sess.language }}</div>
-          <div class="sentence-text" id="sentenceText">{{ current.text }}</div>
-        </div>
-
-        <!-- Predicted emotion (pre‑filled) -->
-        <div class="result-block" style="margin-top:24px">
-          <div class="result-label">Predicted Emotion</div>
-          <div class="sentiment-display" id="sentimentDisplay"></div>
-        </div>
-        <div class="judge-prompt">Does this emotion match what the speaker <em>intended</em> to convey?</div>
-        <div class="judge-buttons">
-          <button class="btn-judge btn-correct" id="judgeCorrect" type="button">
-            <span class="judge-icon">✅</span>
-            <span>Correct</span>
-          </button>
-          <button class="btn-judge btn-wrong" id="judgeWrong" type="button">
-            <span class="judge-icon">❌</span>
-            <span>Wrong</span>
-          </button>
-        </div>
-
-        <div class="status-msg" id="statusMsg"></div>
+      <div class="text-card" id="textCard">
+        <div class="text-lang-tag">{{ sess.language }}</div>
+        <div class="sentence-text" id="sentenceText">{{ current.text }}</div>
       </div>
-      {% endif %}
 
-    </main>
+      <div class="result-block" style="margin-top:24px">
+        <div class="result-label">Predicted Emotion</div>
+        <div class="sentiment-display" id="sentimentDisplay"></div>
+      </div>
+
+      <div class="judge-prompt">Does this emotion match what the speaker <em>intended</em> to convey?</div>
+      <div class="judge-buttons">
+        <button class="btn-judge btn-correct" id="judgeCorrect" type="button">
+          <span class="judge-icon">✅</span>
+          <span>Correct</span>
+        </button>
+        <button class="btn-judge btn-wrong" id="judgeWrong" type="button">
+          <span class="judge-icon">❌</span>
+          <span>Wrong</span>
+        </button>
+      </div>
+
+      <div class="status-msg" id="statusMsg"></div>
+    </div>
+    {% endif %}
+
   </div>
+
+  <div class="save-toast" id="saveToast">✅ Progress saved</div>
 
   <script>
     const TOTAL = {{ total }};
     {% if not done %}
-    // Safely injected from Python as a JSON string — no quote/None injection risk
     const CURRENT = {{ current_json | safe }};
 
     const icons = {
@@ -162,7 +285,6 @@
         </div>`;
     }
 
-    // Call after function + maps are defined, using safely-passed CURRENT
     renderSentiment(CURRENT.predicted_sentiment, CURRENT.confidence, CURRENT.reasoning);
 
     async function judge(judgment) {
@@ -174,10 +296,6 @@
         body: JSON.stringify({ judgment }),
       });
       const data = await res.json();
-      if (data.done) {
-        window.location.reload();
-        return;
-      }
       window.location.reload();
     }
 
@@ -186,10 +304,9 @@
 
     document.getElementById('saveBtn').addEventListener('click', async () => {
       await fetch('/api/save', { method: 'POST' });
-      const msg = document.getElementById('saveMsg');
-      msg.textContent = '✅ Saved!';
-      msg.className = 'save-msg visible';
-      setTimeout(() => { msg.className = 'save-msg'; }, 2500);
+      const toast = document.getElementById('saveToast');
+      toast.classList.add('visible');
+      setTimeout(() => toast.classList.remove('visible'), 2500);
     });
     {% endif %}
   </script>
