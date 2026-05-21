@@ -21,7 +21,7 @@ from huggingface_hub import HfApi
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BUCKET_ID           = "ghananlpcommunity/unicef-evaluator-app-audio-file-storage"
-JSON_DATA_FILE      = "transcriptions_with_emotions.json"   # local file in repo root
+CSV_DATA_FILE       = "transcriptions_with_emotions.csv"    # converted from JSON via convert_to_csv.py
 HF_TOKEN            = os.environ.get("HF_TOKEN", "")
 SECRET_KEY          = os.environ.get("SECRET_KEY", "unicef-asr-secret-change-me")
 
@@ -34,16 +34,27 @@ app.secret_key = SECRET_KEY
 api = HfApi(token=HF_TOKEN)
 
 
-# ── Load precomputed dataset from local JSON (once) ───────────────────────────
+# ── Load precomputed dataset from local CSV (once) ────────────────────────────
 _precomputed_cache = None
 
 def get_precomputed() -> list:
-    """Load the precomputed emotions from local JSON file. Returns list of dicts."""
+    """Load the precomputed emotions from CSV file. Returns list of dicts."""
+    import csv as _csv
     global _precomputed_cache
     if _precomputed_cache is None:
-        with open(JSON_DATA_FILE, "r", encoding="utf-8") as f:
-            _precomputed_cache = json.load(f)
-        print(f"[INFO] Loaded {len(_precomputed_cache)} samples from {JSON_DATA_FILE}")
+        rows = []
+        with open(CSV_DATA_FILE, "r", encoding="utf-8", newline="") as f:
+            reader = _csv.DictReader(f)
+            for row in reader:
+                # Cast numeric fields back to float; skip rows with missing values
+                try:
+                    row["confidence_base"] = float(row["confidence_base"])
+                    row["confidence_ft"]   = float(row["confidence_ft"])
+                except (ValueError, KeyError):
+                    continue  # drop malformed rows at load time too
+                rows.append(row)
+        _precomputed_cache = rows
+        print(f"[INFO] Loaded {len(_precomputed_cache)} samples from {CSV_DATA_FILE}")
     return _precomputed_cache
 
 
