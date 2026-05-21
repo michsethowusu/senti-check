@@ -2,6 +2,7 @@
 UNICEF Ghana NLP ASR Evaluator – Precomputed emotions (local JSON)
 Volunteers see the original text + pre‑predicted emotion and judge.
 """
+
 import os
 import json
 import random
@@ -12,12 +13,15 @@ import tempfile
 import time
 from typing import Optional
 
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import (
+    Flask, render_template, request, jsonify,
+    session, redirect, url_for
+)
 from huggingface_hub import HfApi
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BUCKET_ID           = "ghananlpcommunity/unicef-evaluator-app-audio-file-storage"
-JSON_DATA_FILE      = "transcriptions_with_emotions.json"     # local file in repo root
+JSON_DATA_FILE      = "transcriptions_with_emotions.json"   # local file in repo root
 HF_TOKEN            = os.environ.get("HF_TOKEN", "")
 SECRET_KEY          = os.environ.get("SECRET_KEY", "unicef-asr-secret-change-me")
 
@@ -28,6 +32,7 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
 api = HfApi(token=HF_TOKEN)
+
 
 # ── Load precomputed dataset from local JSON (once) ───────────────────────────
 _precomputed_cache = None
@@ -41,12 +46,15 @@ def get_precomputed() -> list:
         print(f"[INFO] Loaded {len(_precomputed_cache)} samples from {JSON_DATA_FILE}")
     return _precomputed_cache
 
-# ── Claim map helpers (unchanged) ─────────────────────────────────────────────
+
+# ── Claim map helpers ─────────────────────────────────────────────────────────
 def _dl_claim_map():
     try:
         from huggingface_hub import hf_hub_download
-        local = hf_hub_download(repo_id=BUCKET_ID, filename=CLAIM_MAP_PATH,
-                                repo_type="dataset", token=HF_TOKEN)
+        local = hf_hub_download(
+            repo_id=BUCKET_ID, filename=CLAIM_MAP_PATH,
+            repo_type="dataset", token=HF_TOKEN,
+        )
         with open(local) as f:
             return json.load(f)
     except:
@@ -57,14 +65,15 @@ def _ul_claim_map(m):
         json.dump(m, f, ensure_ascii=False, indent=2)
         tmp = f.name
     try:
-        api.upload_file(path_or_fileobj=tmp, path_in_repo=CLAIM_MAP_PATH,
-                        repo_id=BUCKET_ID, repo_type="dataset", token=HF_TOKEN)
+        api.upload_file(
+            path_or_fileobj=tmp, path_in_repo=CLAIM_MAP_PATH,
+            repo_id=BUCKET_ID, repo_type="dataset", token=HF_TOKEN,
+        )
     finally:
         os.unlink(tmp)
 
 def claim_samples(volunteer_id, lang):
     ds = get_precomputed()
-    # Filter by language, maintain deterministic order (original_index)
     lang_indices = [i for i, row in enumerate(ds) if row["language"] == lang]
     total = len(lang_indices)
 
@@ -100,33 +109,42 @@ def claim_samples(volunteer_id, lang):
         except Exception as e:
             print(f"claim error: {e}")
             time.sleep(0.5)
+
     # fallback
     rng = random.Random(f"{volunteer_id}_{lang}_final")
     my_idx = rng.sample(range(total), min(total // MAX_VOLUNTEERS, total))
     return [lang_indices[i] for i in my_idx]
 
-# ── Volunteer code (unchanged) ─────────────────────────────────────────────────
+
+# ── Volunteer code ─────────────────────────────────────────────────────────────
 def decode_code(code):
     try:
         padding = 4 - len(code) % 4
         if padding != 4:
             code += "=" * padding
         payload = json.loads(base64.urlsafe_b64decode(code))
-        expected = hashlib.md5(f"{payload['name']}|{payload['lang'].lower()}|unicef-asr".encode()).hexdigest()[:6]
+        expected = hashlib.md5(
+            f"{payload['name']}|{payload['lang'].lower()}|unicef-asr".encode()
+        ).hexdigest()[:6]
         return payload if payload.get("chk") == expected else None
     except:
         return None
 
-# ── Bucket I/O (unchanged) ─────────────────────────────────────────────────────
+
+# ── Bucket I/O ─────────────────────────────────────────────────────────────────
 def _up(local, remote):
-    api.upload_file(path_or_fileobj=local, path_in_repo=remote,
-                    repo_id=BUCKET_ID, repo_type="dataset", token=HF_TOKEN)
+    api.upload_file(
+        path_or_fileobj=local, path_in_repo=remote,
+        repo_id=BUCKET_ID, repo_type="dataset", token=HF_TOKEN,
+    )
 
 def _dl(remote):
     from huggingface_hub import hf_hub_download
     try:
-        return hf_hub_download(repo_id=BUCKET_ID, filename=remote,
-                               repo_type="dataset", token=HF_TOKEN)
+        return hf_hub_download(
+            repo_id=BUCKET_ID, filename=remote,
+            repo_type="dataset", token=HF_TOKEN,
+        )
     except:
         return None
 
@@ -161,7 +179,8 @@ def save_eval_data(data):
     if vid:
         bucket_save_progress(vid, data)
 
-# ── Session helpers (unchanged except now uses local list) ─────────────────────
+
+# ── Session helpers ────────────────────────────────────────────────────────────
 def new_session(info):
     lang = info["lang"]
     name = info["name"]
@@ -215,7 +234,8 @@ def calc_stats(sess_data):
         "total": len(sess_data["items"]),
     }
 
-# ── Routes (unchanged) ─────────────────────────────────────────────────────────
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     if "volunteer_id" in session:
@@ -305,6 +325,7 @@ def logout():
 @app.route("/health")
 def health():
     return "ok", 200
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
