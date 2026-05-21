@@ -108,6 +108,24 @@
       transition: color .2s;
     }
     .btn-topbar-logout:hover { color: rgba(255,255,255,0.7); }
+    .sent-centered {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 24px 0 8px;
+    }
+    .sent-emoji-big {
+      font-size: 72px;
+      line-height: 1;
+    }
+    .sent-label {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      text-transform: capitalize;
+      letter-spacing: .01em;
+    }
     .save-toast {
       position: fixed;
       bottom: 24px; left: 50%;
@@ -273,15 +291,10 @@
     };
 
     function renderSentiment(s, conf, reason) {
-      const pct = Math.round((conf || 0) * 100);
       document.getElementById('sentimentDisplay').innerHTML = `
-        <div class="sent-row">
-          <span class="sent-emoji">${icons[s] || '😐'}</span>
-          <div>
-            <strong style="color:${colors[s] || '#fff'};text-transform:capitalize;">${s}</strong>
-            <span class="sent-conf">${pct}% confidence</span>
-            <div class="sent-reason">${reason || ''}</div>
-          </div>
+        <div class="sent-centered">
+          <div class="sent-emoji-big">${icons[s] || '😐'}</div>
+          <div class="sent-label" style="color:${colors[s] || '#fff'}">${s}</div>
         </div>`;
     }
 
