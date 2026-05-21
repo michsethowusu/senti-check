@@ -1,17 +1,23 @@
 """
-UNICEF Ghana NLP ASR Evaluator – Precomputed emotions
+UNICEF Ghana NLP ASR Evaluator – Precomputed emotions (local JSON)
 Volunteers see the original text + pre‑predicted emotion and judge.
 """
-import os, json, random, base64, hashlib, datetime, tempfile, time
+import os
+import json
+import random
+import base64
+import hashlib
+import datetime
+import tempfile
+import time
 from typing import Optional
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from huggingface_hub import HfApi
-from datasets import load_dataset
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BUCKET_ID           = "ghananlpcommunity/unicef-evaluator-app-audio-file-storage"
-PRE_COMP_DATASET    = "ghananlpcommunity/unicef-asr-precomputed"   # CHANGE THIS
+JSON_DATA_FILE      = "transcriptions_with_emotions.json"     # local file in repo root
 HF_TOKEN            = os.environ.get("HF_TOKEN", "")
 SECRET_KEY          = os.environ.get("SECRET_KEY", "unicef-asr-secret-change-me")
 
@@ -23,16 +29,19 @@ app.secret_key = SECRET_KEY
 
 api = HfApi(token=HF_TOKEN)
 
-# ── Load precomputed dataset once ─────────────────────────────────────────────
+# ── Load precomputed dataset from local JSON (once) ───────────────────────────
 _precomputed_cache = None
 
-def get_precomputed():
+def get_precomputed() -> list:
+    """Load the precomputed emotions from local JSON file. Returns list of dicts."""
     global _precomputed_cache
     if _precomputed_cache is None:
-        _precomputed_cache = load_dataset(PRE_COMP_DATASET, split="train", token=HF_TOKEN)
+        with open(JSON_DATA_FILE, "r", encoding="utf-8") as f:
+            _precomputed_cache = json.load(f)
+        print(f"[INFO] Loaded {len(_precomputed_cache)} samples from {JSON_DATA_FILE}")
     return _precomputed_cache
 
-# ── Claim map helpers ─────────────────────────────────────────────────────────
+# ── Claim map helpers (unchanged) ─────────────────────────────────────────────
 def _dl_claim_map():
     try:
         from huggingface_hub import hf_hub_download
@@ -55,6 +64,7 @@ def _ul_claim_map(m):
 
 def claim_samples(volunteer_id, lang):
     ds = get_precomputed()
+    # Filter by language, maintain deterministic order (original_index)
     lang_indices = [i for i, row in enumerate(ds) if row["language"] == lang]
     total = len(lang_indices)
 
@@ -95,7 +105,7 @@ def claim_samples(volunteer_id, lang):
     my_idx = rng.sample(range(total), min(total // MAX_VOLUNTEERS, total))
     return [lang_indices[i] for i in my_idx]
 
-# ── Volunteer code ─────────────────────────────────────────────────────────────
+# ── Volunteer code (unchanged) ─────────────────────────────────────────────────
 def decode_code(code):
     try:
         padding = 4 - len(code) % 4
@@ -107,7 +117,7 @@ def decode_code(code):
     except:
         return None
 
-# ── Bucket I/O ─────────────────────────────────────────────────────────────────
+# ── Bucket I/O (unchanged) ─────────────────────────────────────────────────────
 def _up(local, remote):
     api.upload_file(path_or_fileobj=local, path_in_repo=remote,
                     repo_id=BUCKET_ID, repo_type="dataset", token=HF_TOKEN)
@@ -151,7 +161,7 @@ def save_eval_data(data):
     if vid:
         bucket_save_progress(vid, data)
 
-# ── Session helpers ────────────────────────────────────────────────────────────
+# ── Session helpers (unchanged except now uses local list) ─────────────────────
 def new_session(info):
     lang = info["lang"]
     name = info["name"]
@@ -161,7 +171,7 @@ def new_session(info):
     items = []
     for idx in indices:
         row = ds[idx]
-        use_ft = random.choice([True, False])          # 50% chance base / 50% fine‑tuned
+        use_ft = random.choice([True, False])          # 50% base / 50% fine‑tuned
         sentiment = row["sentiment_ft"] if use_ft else row["sentiment_base"]
         confidence = row["confidence_ft"] if use_ft else row["confidence_base"]
         reasoning = row["reasoning_ft"] if use_ft else row["reasoning_base"]
@@ -205,7 +215,7 @@ def calc_stats(sess_data):
         "total": len(sess_data["items"]),
     }
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+# ── Routes (unchanged) ─────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     if "volunteer_id" in session:
