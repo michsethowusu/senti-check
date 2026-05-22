@@ -126,6 +126,64 @@
       text-transform: capitalize;
       letter-spacing: .01em;
     }
+
+    /* ── Emotion picker grid ── */
+    .emotion-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 20px;
+    }
+    @media (max-width: 480px) {
+      .emotion-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    .btn-emotion {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      padding: 10px 6px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.75);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, border-color .15s, transform .1s, color .15s;
+      line-height: 1.2;
+      text-align: center;
+    }
+    .btn-emotion:hover {
+      background: rgba(167,139,250,0.15);
+      border-color: rgba(167,139,250,0.4);
+      color: #fff;
+      transform: translateY(-1px);
+    }
+    .btn-emotion:active { transform: translateY(0); }
+    .btn-emotion.selected {
+      background: rgba(167,139,250,0.25);
+      border-color: #a78bfa;
+      color: #fff;
+    }
+    .btn-emotion:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .emotion-emoji { font-size: 24px; line-height: 1; }
+    .emotion-label { font-size: 11px; }
+
+    /* category dividers */
+    .emotion-section-label {
+      grid-column: 1 / -1;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.25);
+      padding-top: 6px;
+    }
     .save-toast {
       position: fixed;
       bottom: 24px; left: 50%;
@@ -235,7 +293,7 @@
     <div class="eval-content" id="evalContent">
       <div class="step-header">
         <span class="step-counter">{{ num }} <span class="step-of">of {{ total }}</span></span>
-        <span class="step-instruction">Review the text and the predicted emotion</span>
+        <span class="step-instruction">Read the text and pick the emotion the speaker is conveying</span>
       </div>
 
       <div class="text-card" id="textCard">
@@ -243,21 +301,44 @@
         <div class="sentence-text" id="sentenceText">{{ current.text }}</div>
       </div>
 
-      <div class="result-block" style="margin-top:24px">
-        <div class="result-label">Predicted Emotion</div>
-        <div class="sentiment-display" id="sentimentDisplay"></div>
+      <div class="result-label" style="margin-top:24px;font-size:13px;color:rgba(255,255,255,0.45);font-weight:500;">
+        What emotion does this text express?
       </div>
 
-      <div class="judge-prompt">Does this emotion match what the speaker <em>intended</em> to convey?</div>
-      <div class="judge-buttons">
-        <button class="btn-judge btn-correct" id="judgeCorrect" type="button">
-          <span class="judge-icon">✅</span>
-          <span>Correct</span>
-        </button>
-        <button class="btn-judge btn-wrong" id="judgeWrong" type="button">
-          <span class="judge-icon">❌</span>
-          <span>Wrong</span>
-        </button>
+      <div class="emotion-grid" id="emotionGrid">
+        <span class="emotion-section-label">Positive</span>
+        <button class="btn-emotion" data-emotion="Happy">      <span class="emotion-emoji">😊</span><span class="emotion-label">Happy</span></button>
+        <button class="btn-emotion" data-emotion="Excited">    <span class="emotion-emoji">🤩</span><span class="emotion-label">Excited</span></button>
+        <button class="btn-emotion" data-emotion="Proud">      <span class="emotion-emoji">😌</span><span class="emotion-label">Proud</span></button>
+        <button class="btn-emotion" data-emotion="Loved">      <span class="emotion-emoji">❤️</span><span class="emotion-label">Loved</span></button>
+        <button class="btn-emotion" data-emotion="Relieved">   <span class="emotion-emoji">😅</span><span class="emotion-label">Relieved</span></button>
+        <button class="btn-emotion" data-emotion="Grateful">   <span class="emotion-emoji">🙏</span><span class="emotion-label">Grateful</span></button>
+
+        <span class="emotion-section-label">Sad</span>
+        <button class="btn-emotion" data-emotion="Sad">        <span class="emotion-emoji">😢</span><span class="emotion-label">Sad</span></button>
+        <button class="btn-emotion" data-emotion="Lonely">     <span class="emotion-emoji">🥺</span><span class="emotion-label">Lonely</span></button>
+        <button class="btn-emotion" data-emotion="Hopeless">   <span class="emotion-emoji">😞</span><span class="emotion-label">Hopeless</span></button>
+        <button class="btn-emotion" data-emotion="Guilty">     <span class="emotion-emoji">😖</span><span class="emotion-label">Guilty</span></button>
+        <button class="btn-emotion" data-emotion="Ashamed">    <span class="emotion-emoji">😳</span><span class="emotion-label">Ashamed</span></button>
+
+        <span class="emotion-section-label">Angry</span>
+        <button class="btn-emotion" data-emotion="Angry">      <span class="emotion-emoji">😠</span><span class="emotion-label">Angry</span></button>
+        <button class="btn-emotion" data-emotion="Frustrated"> <span class="emotion-emoji">😤</span><span class="emotion-label">Frustrated</span></button>
+        <button class="btn-emotion" data-emotion="Irritated">  <span class="emotion-emoji">😒</span><span class="emotion-label">Irritated</span></button>
+
+        <span class="emotion-section-label">Anxious / Uncertain</span>
+        <button class="btn-emotion" data-emotion="Afraid">     <span class="emotion-emoji">😨</span><span class="emotion-label">Afraid</span></button>
+        <button class="btn-emotion" data-emotion="Anxious">    <span class="emotion-emoji">😰</span><span class="emotion-label">Anxious</span></button>
+        <button class="btn-emotion" data-emotion="Overwhelmed"><span class="emotion-emoji">🤯</span><span class="emotion-label">Overwhelmed</span></button>
+        <button class="btn-emotion" data-emotion="Confused">   <span class="emotion-emoji">😕</span><span class="emotion-label">Confused</span></button>
+        <button class="btn-emotion" data-emotion="Curious">    <span class="emotion-emoji">🤔</span><span class="emotion-label">Curious</span></button>
+        <button class="btn-emotion" data-emotion="Doubtful">   <span class="emotion-emoji">🤨</span><span class="emotion-label">Doubtful</span></button>
+
+        <span class="emotion-section-label">Social / Self</span>
+        <button class="btn-emotion" data-emotion="Embarrassed"><span class="emotion-emoji">😬</span><span class="emotion-label">Embarrassed</span></button>
+        <button class="btn-emotion" data-emotion="Insecure">   <span class="emotion-emoji">🤐</span><span class="emotion-label">Insecure</span></button>
+        <button class="btn-emotion" data-emotion="Jealous">    <span class="emotion-emoji">😒</span><span class="emotion-label">Jealous</span></button>
+        <button class="btn-emotion" data-emotion="Rejected">   <span class="emotion-emoji">💔</span><span class="emotion-label">Rejected</span></button>
       </div>
 
       <div class="status-msg" id="statusMsg"></div>
@@ -273,47 +354,30 @@
     {% if not done %}
     const CURRENT = {{ current_json | safe }};
 
-    const icons = {
-      "Happy":"😊","Excited":"🤩","Proud":"😌","Loved":"❤️","Relieved":"😅","Grateful":"🙏",
-      "Sad":"😢","Lonely":"🥺","Hopeless":"😞","Guilty":"😖","Ashamed":"😳",
-      "Angry":"😠","Frustrated":"😤","Irritated":"😒",
-      "Afraid":"😨","Anxious":"😰","Overwhelmed":"🤯",
-      "Confused":"😕","Curious":"🤔","Doubtful":"🤨",
-      "Embarrassed":"😬","Insecure":"🤐","Jealous":"😒","Rejected":"💔"
-    };
-    const colors = {
-      "Happy":"#34d399","Excited":"#34d399","Proud":"#34d399","Loved":"#34d399","Relieved":"#34d399","Grateful":"#34d399",
-      "Sad":"#f87171","Lonely":"#f87171","Hopeless":"#f87171","Guilty":"#f87171","Ashamed":"#f87171",
-      "Angry":"#f87171","Frustrated":"#f87171","Irritated":"#f87171",
-      "Afraid":"#fbbf24","Anxious":"#fbbf24","Overwhelmed":"#fbbf24",
-      "Confused":"#fbbf24","Curious":"#fbbf24","Doubtful":"#fbbf24",
-      "Embarrassed":"#fbbf24","Insecure":"#fbbf24","Jealous":"#fbbf24","Rejected":"#fbbf24"
-    };
+    // ── Emotion picker logic ──────────────────────────────────────────────────
+    const grid = document.getElementById('emotionGrid');
+    const buttons = grid.querySelectorAll('.btn-emotion');
 
-    function renderSentiment(s, conf, reason) {
-      document.getElementById('sentimentDisplay').innerHTML = `
-        <div class="sent-centered">
-          <div class="sent-emoji-big">${icons[s] || '😐'}</div>
-          <div class="sent-label" style="color:${colors[s] || '#fff'}">${s}</div>
-        </div>`;
-    }
+    async function submitEmotion(choice, btn) {
+      // Visually lock in the selection
+      buttons.forEach(b => { b.disabled = true; });
+      btn.classList.add('selected');
 
-    renderSentiment(CURRENT.predicted_sentiment, CURRENT.confidence, CURRENT.reasoning);
-
-    async function judge(judgment) {
-      document.getElementById('judgeCorrect').disabled = true;
-      document.getElementById('judgeWrong').disabled = true;
       const res = await fetch('/api/judge', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ judgment }),
+        body: JSON.stringify({ volunteer_choice: choice }),
       });
       const data = await res.json();
       window.location.reload();
     }
 
-    document.getElementById('judgeCorrect').addEventListener('click', () => judge('correct'));
-    document.getElementById('judgeWrong').addEventListener('click', () => judge('wrong'));
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const emotion = btn.dataset.emotion;
+        submitEmotion(emotion, btn);
+      });
+    });
 
     document.getElementById('saveBtn').addEventListener('click', async () => {
       await fetch('/api/save', { method: 'POST' });

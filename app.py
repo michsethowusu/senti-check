@@ -187,10 +187,22 @@ def new_session(info):
     vid = f"{name.replace(' ', '_')}_{lang}"
     ds = get_precomputed()
     indices = claim_samples(vid, lang)
+
+    # ── Guaranteed 20 finetuned / 20 base split ───────────────────────────────
+    # If claim_samples returns more or fewer than 40, we cap/pad gracefully,
+    # but the target is always exactly half finetuned, half base.
+    n = len(indices)
+    n_ft = n // 2          # e.g. 20 of 40
+    n_base = n - n_ft      # e.g. 20 of 40
+
+    # Assign model flags deterministically then shuffle so order is random
+    model_flags = [True] * n_ft + [False] * n_base
+    rng = random.Random(f"{vid}_model_assignment")
+    rng.shuffle(model_flags)                           # interleave ft/base randomly
+
     items = []
-    for idx in indices:
+    for idx, use_ft in zip(indices, model_flags):
         row = ds[idx]
-        use_ft = random.choice([True, False])          # 50% base / 50% fine‑tuned
         sentiment = row["sentiment_ft"] if use_ft else row["sentiment_base"]
         confidence = row["confidence_ft"] if use_ft else row["confidence_base"]
         reasoning = row["reasoning_ft"] if use_ft else row["reasoning_base"]
@@ -198,10 +210,11 @@ def new_session(info):
             "index": idx,
             "text": row["text"],                       # original ground‑truth text
             "model_used": "finetuned" if use_ft else "base",
-            "predicted_sentiment": sentiment,
+            "predicted_sentiment": sentiment,          # hidden from volunteer; used for scoring
             "sentiment_confidence": confidence,
             "sentiment_reasoning": reasoning,
-            "volunteer_judgment": None,
+            "volunteer_choice": None,                  # emotion the volunteer selected
+            "volunteer_judgment": None,                # "correct" / "wrong" — derived server‑side
             "completed": False,
         })
     return {
@@ -276,9 +289,9 @@ def evaluate():
     current_json = None
     if current:
         current_json = json.dumps({
-            "predicted_sentiment": current.get("predicted_sentiment") or "",
-            "confidence":          float(current.get("sentiment_confidence") or 0),
-            "reasoning":           current.get("sentiment_reasoning") or "",
+            "text": current.get("text") or "",
+            # NOTE: predicted_sentiment is intentionally NOT sent to the frontend.
+            # Volunteers pick freely; the backend scores the match.
         })
     return render_template("evaluate.html",
                            sess=sess_data, stats=st,
@@ -290,15 +303,21 @@ def api_judge():
     if "volunteer_id" not in session:
         return jsonify({"error": "Not logged in"}), 401
     data = request.get_json()
-    judgment = data.get("judgment")
-    if judgment not in ("correct", "wrong"):
-        return jsonify({"error": "Invalid judgment"}), 400
+    volunteer_choice = (data.get("volunteer_choice") or "").strip()
+    if not volunteer_choice:
+        return jsonify({"error": "No emotion choice provided"}), 400
     sess_data = get_eval_data()
     if not sess_data:
         return jsonify({"error": "Session not found"}), 400
     idx = sess_data["current_index"]
     items = sess_data["items"]
     it = items[idx]
+
+    # Derive correct/wrong by comparing volunteer's pick to the model's prediction
+    predicted = (it.get("predicted_sentiment") or "").strip().lower()
+    judgment = "correct" if volunteer_choice.lower() == predicted else "wrong"
+
+    it["volunteer_choice"] = volunteer_choice
     it["volunteer_judgment"] = judgment
     it["completed"] = True
     items[idx] = it
